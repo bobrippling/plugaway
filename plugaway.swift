@@ -2,9 +2,27 @@ import Carbon
 
 let kIOUSBDeviceClassName = "IOUSBDevice"
 
-enum Event {
-    case ExternalKeyboard(name: String)
-    case InternalKeyboard
+enum Keyboard {
+    case External(_ name: String)
+    case Internal
+}
+
+extension Keyboard {
+    static func from(_ name: String) -> Keyboard? {
+        switch name {
+            case "Apple Internal Keyboard / Trackpad":
+                return Keyboard.Internal
+
+            default:
+                break
+        }
+
+        if name.hasSuffix("Keyboard") {
+            return Keyboard.External(name)
+        }
+
+        return nil
+    }
 }
 
 func startMonitoring() {
@@ -21,72 +39,55 @@ func startMonitoring() {
         notificationPort,
         kIOMatchedNotification,
         matchingDict,
-        deviceAdded,
+        { _ctx, svc in deviceChange(in: true, svc) },
         nil, // context
         &deviceIterator
     )
-
-    // Empty the iterator to arm the notification
-    drain(deviceIterator)
+    deviceChange(in: true, deviceIterator)
 
     IOServiceAddMatchingNotification(
         notificationPort,
         kIOTerminatedNotification,
         matchingDict,
-        deviceRemoved,
+        { ctx, svc in deviceChange(in: false, svc) },
         nil, // context
         &deviceIterator
     )
-    drain(deviceIterator)
+    deviceChange(in: true, deviceIterator)
 }
 
-func drain(_ it: io_iterator_t) {
-    while IOIteratorNext(it) != IO_OBJECT_NULL {}
-}
-
-func deviceAdded(context: UnsafeMutableRawPointer?, service: io_iterator_t) {
-    let event = IOIteratorNext(service)
-    if let name = keyboardName(event) {
-        onChange(Event.ExternalKeyboard(name: name))
+func ioIterate(_ it: io_iterator_t, _ cb: (_: io_service_t) -> Void) {
+    while true {
+        let event = IOIteratorNext(it)
+        guard event != IO_OBJECT_NULL else {
+            break
+        }
+        cb(event)
     }
-    drain(service)
 }
 
-func deviceRemoved(context: UnsafeMutableRawPointer?, service: io_iterator_t) {
-    let event = IOIteratorNext(service)
-    if keyboardName(event) != nil {
-        onChange(Event.InternalKeyboard)
+func deviceChange(in: Bool, _ service: io_iterator_t) {
+    ioIterate(service) { event in
+        if let keyboard = keyboard(event) {
+            onPlug(in: `in`, keyboard)
+        }
     }
-    drain(service)
 }
 
-func keyboardName(_ service: io_service_t) -> String? {
+func keyboard(_ event: io_service_t) -> Keyboard? {
     var nameBuffer: [CChar] = Array(repeating: 0, count: 1024)
 
-    guard IORegistryEntryGetName(service, &nameBuffer) == KERN_SUCCESS else {
+    guard IORegistryEntryGetName(event, &nameBuffer) == KERN_SUCCESS else {
         return nil
     }
 
     let name = String(cString: nameBuffer)
+    let kbd = Keyboard.from(name)
     if debug {
-        print("Device: \"\(name)\"")
-    }
-    switch name {
-        case "Apple Internal Keyboard / Trackpad":
-            return nil
-
-        case "IOUSBHostDevice":
-            return name
-
-        default:
-            break
+        print("event: \"\(name)\", keyboard: \(String(describing: kbd))")
     }
 
-    if name.hasSuffix("Keyboard") {
-        return name
-    }
-
-    return nil
+    return kbd
 }
 
 func getLayouts() -> (TISInputSource, TISInputSource) {
@@ -118,15 +119,24 @@ func getLayouts() -> (TISInputSource, TISInputSource) {
     return (internalLayout, externalLayout)
 }
 
-func onChange(_ event: Event) {
-    switch event {
-        case Event.InternalKeyboard:
-            print("InternalKeyboard")
-            TISSelectInputSource(internalLayout)
+func onPlug(in: Bool, _ keyboard: Keyboard) {
+    switch keyboard {
+        case Keyboard.Internal:
+            if `in` {
+                print("plug InternalKeyboard")
+                TISSelectInputSource(internalLayout)
+            } else {
+                if (debug) { print("unplug InternalKeyboard?") }
+            }
 
-        case Event.ExternalKeyboard(let name):
-            print("ExternalKeyboard: \(name)")
-            TISSelectInputSource(externalLayout)
+        case Keyboard.External(let name):
+            if `in` {
+                print("plug ExternalKeyboard: \(name)")
+                TISSelectInputSource(externalLayout)
+            } else {
+                print("unplug ExternalKeyboard: \(name)")
+                TISSelectInputSource(internalLayout)
+            }
     }
 }
 
