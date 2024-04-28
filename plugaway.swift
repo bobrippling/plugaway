@@ -71,7 +71,22 @@ func keyboardName(_ service: io_service_t) -> String? {
     if debug {
         print("Device: \"\(name)\"")
     }
-    return name
+    switch name {
+        case "Apple Internal Keyboard / Trackpad":
+            return nil
+
+        case "IOUSBHostDevice":
+            return name
+
+        default:
+            break
+    }
+
+    if name.hasSuffix("Keyboard") {
+        return name
+    }
+
+    return nil
 }
 
 func getLayouts() -> (TISInputSource, TISInputSource) {
