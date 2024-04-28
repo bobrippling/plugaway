@@ -1,0 +1,2 @@
+plugaway: plugaway.swift
+	swiftc $<
