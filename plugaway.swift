@@ -68,6 +68,9 @@ func keyboardName(_ service: io_service_t) -> String? {
     }
 
     let name = String(cString: nameBuffer)
+    if debug {
+        print("Device: \"\(name)\"")
+    }
     return name
 }
 
@@ -112,9 +115,19 @@ func onChange(_ event: Event) {
     }
 }
 
-if CommandLine.arguments.count > 1 {
-    print("Usage: \(CommandLine.arguments[0])")
+func usage() {
+    print("Usage: \(CommandLine.arguments[0]) [-d]")
+    print("  -d: debug output")
     exit(2)
+}
+
+var debug = false
+for arg in CommandLine.arguments[1...] {
+    if arg == "-d" {
+        debug = true
+    } else {
+        usage()
+    }
 }
 
 let (internalLayout, externalLayout) = getLayouts()
