@@ -23,6 +23,13 @@ extension Keyboard {
 
         return nil
     }
+
+    func isExternal() -> Bool {
+        switch self {
+            case Keyboard.External(_): return true
+            case Keyboard.Internal: return false
+        }
+    }
 }
 
 func startMonitoring() {
@@ -33,27 +40,36 @@ func startMonitoring() {
     let runLoopSource = IONotificationPortGetRunLoopSource(notificationPort).takeRetainedValue()
     CFRunLoopAddSource(runLoop, runLoopSource, .defaultMode)
 
-    var deviceIterator: io_iterator_t = 0
-
+    var addIter: io_iterator_t = 0
     IOServiceAddMatchingNotification(
         notificationPort,
         kIOMatchedNotification,
         matchingDict,
         { _ctx, svc in deviceChange(in: true, svc) },
         nil, // context
-        &deviceIterator
+        &addIter
     )
-    deviceChange(in: true, deviceIterator)
 
+    var removeIter: io_iterator_t = 0
     IOServiceAddMatchingNotification(
         notificationPort,
         kIOTerminatedNotification,
         matchingDict,
         { ctx, svc in deviceChange(in: false, svc) },
         nil, // context
-        &deviceIterator
+        &removeIter
     )
-    deviceChange(in: true, deviceIterator)
+
+    var events: [io_service_t] = []
+    ioIterate(addIter) { events.append($0) }
+    ioIterate(removeIter) { events.append($0) }
+    let keyboards = events.compactMap({ keyboard($0) })
+    let externalKbd = keyboards.last(where: { $0.isExternal() });
+    if let externalKbd = externalKbd {
+        onPlug(in: true, externalKbd)
+    } else {
+        onPlug(in: true, keyboards[0])
+    }
 }
 
 func ioIterate(_ it: io_iterator_t, _ cb: (_: io_service_t) -> Void) {
